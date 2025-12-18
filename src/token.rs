@@ -2,8 +2,8 @@
 //! This module provides the LP (Liquidity Provider) token functionality
 use odra::prelude::*;
 use odra::casper_types::U256;
-use odra::{Address, Mapping, Var};
 use crate::events::{Transfer, Approval};
+use crate::errors::TokenError;
 
 /// LP Token module implementing CEP-18 standard
 #[odra::module]
@@ -82,7 +82,7 @@ impl LpToken {
         let current_allowance = self.allowance(from, caller);
         
         if current_allowance < amount {
-            self.env().revert(odra::ExecutionError::User(1)); // InsufficientAllowance
+            self.env().revert(TokenError::InsufficientAllowance);
         }
         
         self.approve_internal(from, caller, current_allowance - amount);
@@ -110,7 +110,7 @@ impl LpToken {
     pub fn burn(&mut self, from: Address, amount: U256) {
         let current_balance = self.balance_of(from);
         if current_balance < amount {
-            self.env().revert(odra::ExecutionError::User(2)); // InsufficientBalance
+            self.env().revert(TokenError::InsufficientBalance);
         }
 
         self.balances.set(&from, current_balance - amount);
@@ -129,7 +129,7 @@ impl LpToken {
     fn transfer_internal(&mut self, from: Address, to: Address, amount: U256) {
         let from_balance = self.balance_of(from);
         if from_balance < amount {
-            self.env().revert(odra::ExecutionError::User(2)); // InsufficientBalance
+            self.env().revert(TokenError::InsufficientBalance);
         }
 
         self.balances.set(&from, from_balance - amount);

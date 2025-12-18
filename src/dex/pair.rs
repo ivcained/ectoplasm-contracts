@@ -1,15 +1,16 @@
+
 //! Liquidity Pair contract for the DEX
-//! 
+//!
 //! Each Pair holds reserves of two tokens and allows:
 //! - Adding liquidity (minting LP tokens)
 //! - Removing liquidity (burning LP tokens)
 //! - Swapping tokens
 use odra::prelude::*;
 use odra::casper_types::U256;
-use odra::{Address, Mapping, SubModule, Var};
+use odra::ContractRef;
 use crate::errors::DexError;
 use crate::events::{LiquidityAdded, LiquidityRemoved, Swap, Sync};
-use crate::math::{AmmMath, SafeMath, MINIMUM_LIQUIDITY};
+use crate::math::MINIMUM_LIQUIDITY;
 use crate::token::{LpToken, Cep18TokenContractRef};
 
 /// Liquidity Pair contract
@@ -70,12 +71,12 @@ impl Pair {
 
     /// Get token0 address
     pub fn token0(&self) -> Address {
-        self.token0.get_or_revert()
+        self.token0.get_or_revert_with(DexError::InvalidPair)
     }
 
     /// Get token1 address
     pub fn token1(&self) -> Address {
-        self.token1.get_or_revert()
+        self.token1.get_or_revert_with(DexError::InvalidPair)
     }
 
     /// Get current reserves
@@ -114,8 +115,8 @@ impl Pair {
 
     /// Mint LP tokens when liquidity is added
     /// Returns the amount of LP tokens minted
-    pub fn mint(&mut self, to: Address) -> Result<U256, DexError> {
-        self.lock()?;
+    pub fn mint(&mut self, to: Address) -> U256 {
+        self.lock();
 
         let (reserve0, reserve1, _) = self.get_reserves();
         
@@ -124,41 +125,43 @@ impl Pair {
         let balance1 = self.get_token_balance(self.token1());
 
         // Calculate amounts deposited
-        let amount0 = SafeMath::sub(balance0, reserve0)?;
-        let amount1 = SafeMath::sub(balance1, reserve1)?;
+        let amount0 = self.safe_sub(balance0, reserve0);
+        let amount1 = self.safe_sub(balance1, reserve1);
 
         let total_supply = self.total_supply();
         let liquidity: U256;
 
         if total_supply.is_zero() {
-            // First liquidity provision
-            liquidity = AmmMath::calculate_liquidity(
-                amount0, amount1, reserve0, reserve1, total_supply
-            )?;
+            // First liquidity provision: sqrt(amount0 * amount1) - MINIMUM_LIQUIDITY
+            let product = self.safe_mul(amount0, amount1);
+            liquidity = self.safe_sub(self.sqrt(product), U256::from(MINIMUM_LIQUIDITY));
             
             // Permanently lock MINIMUM_LIQUIDITY tokens
+            // Get self_address before mutable borrow
+            let self_addr = Address::from(self.env().self_address());
             self.lp_token.mint(
-                Address::from(self.env().self_address()),
+                self_addr,
                 U256::from(MINIMUM_LIQUIDITY),
             );
         } else {
-            liquidity = AmmMath::calculate_liquidity(
-                amount0, amount1, reserve0, reserve1, total_supply
-            )?;
+            // Subsequent liquidity: min(amount0 * totalSupply / reserve0, amount1 * totalSupply / reserve1)
+            let liquidity0 = self.safe_div(self.safe_mul(amount0, total_supply), reserve0);
+            let liquidity1 = self.safe_div(self.safe_mul(amount1, total_supply), reserve1);
+            liquidity = if liquidity0 < liquidity1 { liquidity0 } else { liquidity1 };
         }
 
         if liquidity.is_zero() {
-            return Err(DexError::InsufficientLiquidityMinted);
+            self.env().revert(DexError::InsufficientLiquidityMinted);
         }
 
         self.lp_token.mint(to, liquidity);
 
         // Update reserves
-        self.update_reserves(balance0, balance1)?;
+        self.update_reserves(balance0, balance1);
 
         // Update k_last for fee calculation
         let (new_reserve0, new_reserve1, _) = self.get_reserves();
-        self.k_last.set(SafeMath::mul(new_reserve0, new_reserve1)?);
+        self.k_last.set(self.safe_mul(new_reserve0, new_reserve1));
 
         self.env().emit_event(LiquidityAdded {
             provider: to,
@@ -169,15 +172,15 @@ impl Pair {
         });
 
         self.unlock();
-        Ok(liquidity)
+        liquidity
     }
 
     /// Burn LP tokens when liquidity is removed
     /// Returns the amounts of token0 and token1 returned
-    pub fn burn(&mut self, to: Address) -> Result<(U256, U256), DexError> {
-        self.lock()?;
+    pub fn burn(&mut self, to: Address) -> (U256, U256) {
+        self.lock();
 
-        let (reserve0, reserve1, _) = self.get_reserves();
+        let (_reserve0, _reserve1, _) = self.get_reserves();
         let token0 = self.token0();
         let token1 = self.token1();
 
@@ -189,22 +192,31 @@ impl Pair {
         let liquidity = self.lp_token.balance_of(self.env().self_address());
         let total_supply = self.total_supply();
 
-        // Calculate amounts to return
-        let (amount0, amount1) = AmmMath::calculate_burn_amounts(
-            liquidity, reserve0, reserve1, total_supply
-        )?;
+        if total_supply.is_zero() {
+            self.env().revert(DexError::InsufficientLiquidity);
+        }
+
+        // Calculate amounts to return: amount = liquidity * balance / totalSupply
+        let amount0 = self.safe_div(self.safe_mul(liquidity, balance0), total_supply);
+        let amount1 = self.safe_div(self.safe_mul(liquidity, balance1), total_supply);
+
+        if amount0.is_zero() && amount1.is_zero() {
+            self.env().revert(DexError::InsufficientLiquidityBurned);
+        }
 
         // Burn LP tokens
-        self.lp_token.burn(self.env().self_address(), liquidity);
+        // Get self_address before mutable borrow
+        let self_addr = self.env().self_address();
+        self.lp_token.burn(self_addr, liquidity);
 
         // Transfer tokens to user
-        self.safe_transfer(token0, to, amount0)?;
-        self.safe_transfer(token1, to, amount1)?;
+        self.safe_transfer(token0, to, amount0);
+        self.safe_transfer(token1, to, amount1);
 
         // Update reserves
-        let new_balance0 = SafeMath::sub(balance0, amount0)?;
-        let new_balance1 = SafeMath::sub(balance1, amount1)?;
-        self.update_reserves(new_balance0, new_balance1)?;
+        let new_balance0 = self.safe_sub(balance0, amount0);
+        let new_balance1 = self.safe_sub(balance1, amount1);
+        self.update_reserves(new_balance0, new_balance1);
 
         self.env().emit_event(LiquidityRemoved {
             provider: to,
@@ -215,7 +227,7 @@ impl Pair {
         });
 
         self.unlock();
-        Ok((amount0, amount1))
+        (amount0, amount1)
     }
 
     /// Swap tokens
@@ -226,17 +238,17 @@ impl Pair {
         amount0_out: U256,
         amount1_out: U256,
         to: Address,
-    ) -> Result<(), DexError> {
-        self.lock()?;
+    ) {
+        self.lock();
 
         if amount0_out.is_zero() && amount1_out.is_zero() {
-            return Err(DexError::InsufficientOutputAmount);
+            self.env().revert(DexError::InsufficientOutputAmount);
         }
 
         let (reserve0, reserve1, _) = self.get_reserves();
 
         if amount0_out >= reserve0 || amount1_out >= reserve1 {
-            return Err(DexError::InsufficientLiquidity);
+            self.env().revert(DexError::InsufficientLiquidity);
         }
 
         let token0 = self.token0();
@@ -244,15 +256,15 @@ impl Pair {
 
         // Ensure recipient is not one of the tokens
         if to == token0 || to == token1 {
-            return Err(DexError::InvalidPair);
+            self.env().revert(DexError::InvalidPair);
         }
 
         // Transfer tokens out
         if !amount0_out.is_zero() {
-            self.safe_transfer(token0, to, amount0_out)?;
+            self.safe_transfer(token0, to, amount0_out);
         }
         if !amount1_out.is_zero() {
-            self.safe_transfer(token1, to, amount1_out)?;
+            self.safe_transfer(token1, to, amount1_out);
         }
 
         // Get new balances
@@ -260,46 +272,46 @@ impl Pair {
         let balance1 = self.get_token_balance(token1);
 
         // Calculate amounts in
-        let amount0_in = if balance0 > SafeMath::sub(reserve0, amount0_out)? {
-            SafeMath::sub(balance0, SafeMath::sub(reserve0, amount0_out)?)?
+        let reserve0_minus_out = self.safe_sub(reserve0, amount0_out);
+        let reserve1_minus_out = self.safe_sub(reserve1, amount1_out);
+        
+        let amount0_in = if balance0 > reserve0_minus_out {
+            self.safe_sub(balance0, reserve0_minus_out)
         } else {
             U256::zero()
         };
-        let amount1_in = if balance1 > SafeMath::sub(reserve1, amount1_out)? {
-            SafeMath::sub(balance1, SafeMath::sub(reserve1, amount1_out)?)?
+        let amount1_in = if balance1 > reserve1_minus_out {
+            self.safe_sub(balance1, reserve1_minus_out)
         } else {
             U256::zero()
         };
 
         if amount0_in.is_zero() && amount1_in.is_zero() {
-            return Err(DexError::InsufficientInputAmount);
+            self.env().revert(DexError::InsufficientInputAmount);
         }
 
         // Verify K invariant (with fee adjustment)
-        // balance0_adjusted = balance0 * 1000 - amount0_in * 3
-        // balance1_adjusted = balance1 * 1000 - amount1_in * 3
-        // balance0_adjusted * balance1_adjusted >= reserve0 * reserve1 * 1000^2
-        let balance0_adjusted = SafeMath::sub(
-            SafeMath::mul(balance0, U256::from(1000))?,
-            SafeMath::mul(amount0_in, U256::from(3))?,
-        )?;
-        let balance1_adjusted = SafeMath::sub(
-            SafeMath::mul(balance1, U256::from(1000))?,
-            SafeMath::mul(amount1_in, U256::from(3))?,
-        )?;
+        let balance0_adjusted = self.safe_sub(
+            self.safe_mul(balance0, U256::from(1000)),
+            self.safe_mul(amount0_in, U256::from(3)),
+        );
+        let balance1_adjusted = self.safe_sub(
+            self.safe_mul(balance1, U256::from(1000)),
+            self.safe_mul(amount1_in, U256::from(3)),
+        );
 
-        let k_new = SafeMath::mul(balance0_adjusted, balance1_adjusted)?;
-        let k_old = SafeMath::mul(
-            SafeMath::mul(reserve0, reserve1)?,
+        let k_new = self.safe_mul(balance0_adjusted, balance1_adjusted);
+        let k_old = self.safe_mul(
+            self.safe_mul(reserve0, reserve1),
             U256::from(1000000),
-        )?;
+        );
 
         if k_new < k_old {
-            return Err(DexError::KInvariantViolated);
+            self.env().revert(DexError::KInvariantViolated);
         }
 
         // Update reserves
-        self.update_reserves(balance0, balance1)?;
+        self.update_reserves(balance0, balance1);
 
         self.env().emit_event(Swap {
             sender: self.env().caller(),
@@ -312,11 +324,10 @@ impl Pair {
         });
 
         self.unlock();
-        Ok(())
     }
 
     /// Force reserves to match balances (for recovery)
-    pub fn skim(&mut self, to: Address) -> Result<(), DexError> {
+    pub fn skim(&mut self, to: Address) {
         let token0 = self.token0();
         let token1 = self.token1();
         let (reserve0, reserve1, _) = self.get_reserves();
@@ -325,48 +336,44 @@ impl Pair {
         let balance1 = self.get_token_balance(token1);
 
         if balance0 > reserve0 {
-            self.safe_transfer(token0, to, SafeMath::sub(balance0, reserve0)?)?;
+            self.safe_transfer(token0, to, self.safe_sub(balance0, reserve0));
         }
         if balance1 > reserve1 {
-            self.safe_transfer(token1, to, SafeMath::sub(balance1, reserve1)?)?;
+            self.safe_transfer(token1, to, self.safe_sub(balance1, reserve1));
         }
-
-        Ok(())
     }
 
     /// Force balances to match reserves (for recovery)
-    pub fn sync(&mut self) -> Result<(), DexError> {
+    pub fn sync(&mut self) {
         let token0 = self.token0();
         let token1 = self.token1();
 
         let balance0 = self.get_token_balance(token0);
         let balance1 = self.get_token_balance(token1);
 
-        self.update_reserves(balance0, balance1)
+        self.update_reserves(balance0, balance1);
     }
 
     /// Get the price of token0 in terms of token1
-    pub fn get_price0(&self) -> Result<U256, DexError> {
+    pub fn get_price0(&self) -> U256 {
         let (reserve0, reserve1, _) = self.get_reserves();
         if reserve0.is_zero() {
-            return Err(DexError::InsufficientLiquidity);
+            self.env().revert(DexError::InsufficientLiquidity);
         }
-        // Price with 18 decimal precision
-        SafeMath::div(
-            SafeMath::mul(reserve1, U256::from(10u128.pow(18)))?,
+        self.safe_div(
+            self.safe_mul(reserve1, U256::from(10u128.pow(18))),
             reserve0,
         )
     }
 
     /// Get the price of token1 in terms of token0
-    pub fn get_price1(&self) -> Result<U256, DexError> {
+    pub fn get_price1(&self) -> U256 {
         let (reserve0, reserve1, _) = self.get_reserves();
         if reserve1.is_zero() {
-            return Err(DexError::InsufficientLiquidity);
+            self.env().revert(DexError::InsufficientLiquidity);
         }
-        // Price with 18 decimal precision
-        SafeMath::div(
-            SafeMath::mul(reserve0, U256::from(10u128.pow(18)))?,
+        self.safe_div(
+            self.safe_mul(reserve0, U256::from(10u128.pow(18))),
             reserve1,
         )
     }
@@ -374,7 +381,7 @@ impl Pair {
     // ============ Internal Functions ============
 
     /// Update reserves and emit Sync event
-    fn update_reserves(&mut self, balance0: U256, balance1: U256) -> Result<(), DexError> {
+    fn update_reserves(&mut self, balance0: U256, balance1: U256) {
         self.reserve0.set(balance0);
         self.reserve1.set(balance1);
         self.block_timestamp_last.set(self.env().get_block_time());
@@ -384,8 +391,6 @@ impl Pair {
             reserve0: balance0,
             reserve1: balance1,
         });
-
-        Ok(())
     }
 
     /// Get token balance of this contract
@@ -395,27 +400,61 @@ impl Pair {
     }
 
     /// Safe transfer tokens
-    fn safe_transfer(&self, token: Address, to: Address, amount: U256) -> Result<(), DexError> {
+    fn safe_transfer(&self, token: Address, to: Address, amount: U256) {
         let mut token_ref = Cep18TokenContractRef::new(self.env(), token);
         let success = token_ref.transfer(to, amount);
         if !success {
-            return Err(DexError::TransferFailed);
+            self.env().revert(DexError::TransferFailed);
         }
-        Ok(())
     }
 
     /// Reentrancy lock
-    fn lock(&mut self) -> Result<(), DexError> {
+    fn lock(&mut self) {
         if self.locked.get_or_default() {
-            return Err(DexError::Locked);
+            self.env().revert(DexError::Locked);
         }
         self.locked.set(true);
-        Ok(())
     }
 
     /// Reentrancy unlock
     fn unlock(&mut self) {
         self.locked.set(false);
+    }
+
+    /// Safe multiplication with overflow check
+    fn safe_mul(&self, a: U256, b: U256) -> U256 {
+        a.checked_mul(b).unwrap_or_else(|| {
+            self.env().revert(DexError::Overflow);
+        })
+    }
+
+    /// Safe subtraction with underflow check
+    fn safe_sub(&self, a: U256, b: U256) -> U256 {
+        a.checked_sub(b).unwrap_or_else(|| {
+            self.env().revert(DexError::Underflow);
+        })
+    }
+
+    /// Safe division with zero check
+    fn safe_div(&self, a: U256, b: U256) -> U256 {
+        if b.is_zero() {
+            self.env().revert(DexError::DivisionByZero);
+        }
+        a / b
+    }
+
+    /// Integer square root using Newton's method
+    fn sqrt(&self, n: U256) -> U256 {
+        if n.is_zero() {
+            return U256::zero();
+        }
+        let mut x = n;
+        let mut y = (x + U256::one()) / 2;
+        while y < x {
+            x = y;
+            y = (x + n / x) / 2;
+        }
+        x
     }
 }
 

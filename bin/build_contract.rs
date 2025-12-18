@@ -2,7 +2,7 @@
 #![doc = "Binary for building WASM contracts from odra modules."]
 
 #[allow(unused_imports)]
-use my_project;
+use ectoplasm_contracts;
 
 fn main() {
     // This binary is used by the Odra build system to compile contracts to WASM

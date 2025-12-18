@@ -1,7 +1,7 @@
 //! Event definitions for the DEX smart contract
 use odra::prelude::*;
 use odra::casper_types::U256;
-use odra::Address;
+use odra::prelude::Address;
 
 /// Event emitted when a new pair is created
 #[odra::event]

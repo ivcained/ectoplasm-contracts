@@ -1,95 +1,82 @@
 //! Error definitions for the DEX smart contract
 use odra::prelude::*;
-use odra::OdraError;
 
 /// Custom errors for the DEX contract
-#[derive(OdraError, Debug, PartialEq, Eq)]
+#[odra::odra_error]
 pub enum DexError {
     /// Insufficient liquidity in the pool
-    #[odra_error(code = 1)]
-    InsufficientLiquidity,
+    InsufficientLiquidity = 1,
     
     /// Insufficient input amount for swap
-    #[odra_error(code = 2)]
-    InsufficientInputAmount,
+    InsufficientInputAmount = 2,
     
     /// Insufficient output amount for swap
-    #[odra_error(code = 3)]
-    InsufficientOutputAmount,
+    InsufficientOutputAmount = 3,
     
     /// Invalid token pair
-    #[odra_error(code = 4)]
-    InvalidPair,
+    InvalidPair = 4,
     
     /// Pair already exists
-    #[odra_error(code = 5)]
-    PairExists,
+    PairExists = 5,
     
     /// Pair does not exist
-    #[odra_error(code = 6)]
-    PairNotFound,
+    PairNotFound = 6,
     
     /// Zero address provided
-    #[odra_error(code = 7)]
-    ZeroAddress,
+    ZeroAddress = 7,
     
     /// Identical addresses provided
-    #[odra_error(code = 8)]
-    IdenticalAddresses,
+    IdenticalAddresses = 8,
     
     /// Insufficient amount
-    #[odra_error(code = 9)]
-    InsufficientAmount,
+    InsufficientAmount = 9,
     
     /// Transfer failed
-    #[odra_error(code = 10)]
-    TransferFailed,
+    TransferFailed = 10,
     
     /// Deadline expired
-    #[odra_error(code = 11)]
-    DeadlineExpired,
+    DeadlineExpired = 11,
     
     /// Slippage too high
-    #[odra_error(code = 12)]
-    ExcessiveSlippage,
+    ExcessiveSlippage = 12,
     
     /// Overflow error
-    #[odra_error(code = 13)]
-    Overflow,
+    Overflow = 13,
     
     /// Underflow error
-    #[odra_error(code = 14)]
-    Underflow,
+    Underflow = 14,
     
     /// Division by zero
-    #[odra_error(code = 15)]
-    DivisionByZero,
+    DivisionByZero = 15,
     
     /// Unauthorized access
-    #[odra_error(code = 16)]
-    Unauthorized,
+    Unauthorized = 16,
     
     /// Invalid path for swap
-    #[odra_error(code = 17)]
-    InvalidPath,
+    InvalidPath = 17,
     
     /// K value invariant violated
-    #[odra_error(code = 18)]
-    KInvariantViolated,
+    KInvariantViolated = 18,
     
     /// Insufficient liquidity minted
-    #[odra_error(code = 19)]
-    InsufficientLiquidityMinted,
+    InsufficientLiquidityMinted = 19,
     
     /// Insufficient liquidity burned
-    #[odra_error(code = 20)]
-    InsufficientLiquidityBurned,
+    InsufficientLiquidityBurned = 20,
     
     /// Locked - reentrancy guard
-    #[odra_error(code = 21)]
-    Locked,
+    Locked = 21,
     
     /// Invalid fee
-    #[odra_error(code = 22)]
-    InvalidFee,
+    InvalidFee = 22,
+}
+
+/// Custom errors for the LP Token contract
+#[odra::odra_error]
+pub enum TokenError {
+    /// Insufficient allowance for transfer
+    InsufficientAllowance = 100,
+    
+    /// Insufficient balance for operation
+    InsufficientBalance = 101,
 }

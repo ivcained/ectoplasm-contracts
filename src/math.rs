@@ -1,6 +1,5 @@
 //! Mathematical utilities for the DEX smart contract
 //! Implements safe math operations and AMM formulas
-use odra::prelude::*;
 use odra::casper_types::U256;
 use crate::errors::DexError;
 
