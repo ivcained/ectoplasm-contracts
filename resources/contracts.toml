@@ -1,0 +1,13 @@
+last_updated = "2025-12-21T15:37:50Z"
+
+[[contracts]]
+name = "Factory"
+package_hash = "hash-c6c3cadda303246b4e7c953751e56ef36e1d804feb13515ff17f04f242a60bcd"
+
+[[contracts]]
+name = "LpToken"
+package_hash = "hash-16eacd913f576394fbf114f652504e960367be71b560795fb9d7cf4d5c98ea68"
+
+[[contracts]]
+name = "Router"
+package_hash = "hash-c50d491c65e5cbc8ab859fe6e7d1253c24cf877258bf4579a59e6ce4d5d15275"

@@ -19,3 +19,19 @@ fqn = "dex::factory::Factory"
 # DEX Router contract
 [[contracts]]
 fqn = "dex::router::Router"
+
+# ECTO Token contract
+[[contracts]]
+fqn = "tokens::EctoToken"
+
+# USDC Token contract
+[[contracts]]
+fqn = "tokens::UsdcToken"
+
+# WETH Token contract
+[[contracts]]
+fqn = "tokens::WethToken"
+
+# WBTC Token contract
+[[contracts]]
+fqn = "tokens::WbtcToken"

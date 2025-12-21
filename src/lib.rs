@@ -8,6 +8,7 @@ pub mod flipper;
 // DEX modules
 pub mod dex;
 pub mod token;
+pub mod tokens;
 pub mod errors;
 pub mod events;
 pub mod math;

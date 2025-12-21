@@ -5,4 +5,17 @@ Cargo.lock
 .backend*
 .builder*
 /wasm
+
+# Environment and secrets
 .env
+.env.local
+.env.*.local
+
+# Deployment keys - NEVER commit these!
+/keys/
+*.pem
+secret_key*
+
+# Deployment artifacts
+deployment_info.json
+deployment_*.json

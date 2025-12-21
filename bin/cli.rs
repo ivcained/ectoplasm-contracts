@@ -3,9 +3,11 @@
 use ectoplasm_contracts::dex::factory::Factory;
 use ectoplasm_contracts::dex::router::Router;
 use ectoplasm_contracts::token::LpToken;
+use ectoplasm_contracts::tokens::{EctoToken, UsdcToken, WethToken, WbtcToken};
 use odra::prelude::{Address, Addressable};
-use odra::host::HostEnv;
+use odra::host::{HostEnv, Deployer};
 use odra::schema::casper_contract_schema::NamedCLType;
+use odra::host::NoArgs;
 use odra_cli::{
     deploy::DeployScript,
     scenario::{Args, Error, Scenario, ScenarioMetadata},
@@ -63,7 +65,7 @@ impl DeployScript for RouterDeployScript {
                 symbol: String::from("WCSPR"),
             },
             container,
-            300_000_000_000
+            600_000_000_000 // Increased gas limit for token deployment
         )?;
         
         let _router = Router::load_or_deploy(
@@ -94,6 +96,58 @@ impl DeployScript for DexDeployScript {
         
         // Then deploy Router
         RouterDeployScript.deploy(env, container)?;
+        
+        Ok(())
+    }
+}
+
+/// Deploys all test tokens for the DEX (ECTO, USDC, WETH, WBTC).
+pub struct TokensDeployScript;
+
+impl DeployScript for TokensDeployScript {
+    fn deploy(
+        &self,
+        env: &HostEnv,
+        container: &mut DeployedContractsContainer
+    ) -> Result<(), odra_cli::deploy::Error> {
+        // Deploy ECTO token
+        env.set_gas(600_000_000_000);
+        let ecto = EctoToken::try_deploy(&env, NoArgs)?;
+        println!("ECTO token deployed at: {:?}", ecto.address());
+        
+        // Deploy USDC token (test stablecoin)
+        env.set_gas(600_000_000_000);
+        let usdc = UsdcToken::try_deploy(&env, NoArgs)?;
+        println!("USDC token deployed at: {:?}", usdc.address());
+        
+        // Deploy WETH token (wrapped ETH)
+        env.set_gas(600_000_000_000);
+        let weth = WethToken::try_deploy(&env, NoArgs)?;
+        println!("WETH token deployed at: {:?}", weth.address());
+        
+        // Deploy WBTC token (wrapped BTC)
+        env.set_gas(600_000_000_000);
+        let wbtc = WbtcToken::try_deploy(&env, NoArgs)?;
+        println!("WBTC token deployed at: {:?}", wbtc.address());
+        
+        Ok(())
+    }
+}
+
+/// Deploys everything: DEX + all test tokens.
+pub struct FullDeployScript;
+
+impl DeployScript for FullDeployScript {
+    fn deploy(
+        &self,
+        env: &HostEnv,
+        container: &mut DeployedContractsContainer
+    ) -> Result<(), odra_cli::deploy::Error> {
+        // Deploy DEX (Factory + Router + WCSPR)
+        DexDeployScript.deploy(env, container)?;
+        
+        // Deploy test tokens
+        TokensDeployScript.deploy(env, container)?;
         
         Ok(())
     }
@@ -149,10 +203,16 @@ pub fn main() {
         .deploy(FactoryDeployScript)
         .deploy(RouterDeployScript)
         .deploy(DexDeployScript)
+        .deploy(TokensDeployScript)
+        .deploy(FullDeployScript)
         // Contract references
         .contract::<Factory>()
         .contract::<Router>()
         .contract::<LpToken>()
+        .contract::<EctoToken>()
+        .contract::<UsdcToken>()
+        .contract::<WethToken>()
+        .contract::<WbtcToken>()
         // Scenarios
         .scenario(CreatePairScenario)
         .build()
