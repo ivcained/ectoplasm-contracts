@@ -61,16 +61,18 @@ echo "  Node: $NODE_ADDRESS"
 # Use configured values
 API_KEY="$CSPR_CLOUD_API_KEY"
 SECRET_KEY="$SECRET_KEY_PATH"
-ACCOUNT_HASH="$DEPLOYER_ACCOUNT_HASH"
+# DEPLOYER_ACCOUNT_HASH is actually the public key in this config
+DEPLOYER_PUBLIC_KEY="$DEPLOYER_ACCOUNT_HASH"
 
 # Gas amounts (use defaults if not set)
-GAS_TOKEN=${GAS_TOKEN_DEPLOY:-150000000000}
-GAS_FACTORY=${GAS_FACTORY_DEPLOY:-200000000000}
-GAS_ROUTER=${GAS_ROUTER_DEPLOY:-200000000000}
-GAS_PAIR=${GAS_CREATE_PAIR:-100000000000}
-GAS_LIQUIDITY=${GAS_ADD_LIQUIDITY:-50000000000}
-GAS_SWAP_AMOUNT=${GAS_SWAP:-30000000000}
-GAS_APPROVE_AMOUNT=${GAS_APPROVE:-5000000000}
+# Odra contracts require significant gas - 500 CSPR for tokens, 1000+ for Factory/Router
+GAS_TOKEN=${GAS_TOKEN_DEPLOY:-500000000000}
+GAS_FACTORY=${GAS_FACTORY_DEPLOY:-1000000000000}
+GAS_ROUTER=${GAS_ROUTER_DEPLOY:-1000000000000}
+GAS_PAIR=${GAS_CREATE_PAIR:-200000000000}
+GAS_LIQUIDITY=${GAS_ADD_LIQUIDITY:-100000000000}
+GAS_SWAP_AMOUNT=${GAS_SWAP:-50000000000}
+GAS_APPROVE_AMOUNT=${GAS_APPROVE:-10000000000}
 
 # Contract hashes (to be filled after deployment)
 FACTORY_HASH=""
@@ -108,21 +110,24 @@ check_deploy() {
     return 1
 }
 
-# Function to get contract hash from deploy
+# Function to get contract hash from account named keys
 get_contract_hash() {
-    local deploy_hash=$1
-    response=$(curl -s -X GET "https://api.testnet.cspr.cloud/deploys/$deploy_hash" \
-        -H "Authorization: $API_KEY")
-    echo $response | jq -r '.data.contract_hash // empty'
+    local key_name=$1
+    response=$(casper-client get-account-info \
+        --node-address "$NODE_ADDRESS" \
+        --public-key "$DEPLOYER_PUBLIC_KEY" \
+        2>&1 | grep -v "^#")
+    echo "$response" | jq -r ".result.account.named_keys[] | select(.name == \"$key_name\") | .key" | sed 's/hash-//'
 }
 
 # Function to update .env file with contract hash
 update_env() {
     local key=$1
     local value=$2
-    
+
     if grep -q "^$key=" .env; then
-        sed -i "s|^$key=.*|$key=$value|" .env
+        # macOS compatible sed (use '' for in-place edit)
+        sed -i '' "s|^$key=.*|$key=$value|" .env
     else
         echo "$key=$value" >> .env
     fi
@@ -151,151 +156,170 @@ fi
 
 echo -e "${GREEN}Prerequisites OK${NC}"
 
-# Step 2: Build contracts
-echo -e "\n${YELLOW}Step 2: Building contracts...${NC}"
-cargo odra build
-echo -e "${GREEN}Contracts built successfully${NC}"
+# Step 2: Build contracts (skip if already built)
+echo -e "\n${YELLOW}Step 2: Checking contracts...${NC}"
+if [ -f "./wasm/EctoToken.wasm" ]; then
+    echo -e "${GREEN}Contracts already built, skipping build step${NC}"
+else
+    echo "Building contracts..."
+    cargo odra build
+    echo -e "${GREEN}Contracts built successfully${NC}"
+fi
 
 # Step 3: Deploy tokens
 echo -e "\n${YELLOW}Step 3: Deploying tokens...${NC}"
 
-# Deploy ECTO Token
+# Deploy ECTO Token (Odra-built, values hardcoded in contract)
+# Odra contracts require: odra_cfg_package_hash_key_name and odra_cfg_allow_key_override
 echo "Deploying ECTO Token..."
 ECTO_DEPLOY=$(casper-client put-deploy \
-    --node-address $NODE_ADDRESS \
-    --chain-name $CHAIN_NAME \
-    --secret-key $SECRET_KEY \
+    --node-address "$NODE_ADDRESS" \
+    --chain-name "$CHAIN_NAME" \
+    --secret-key "$SECRET_KEY" \
     --payment-amount $GAS_TOKEN \
-    --session-path ./wasm/Cep18.wasm \
-    --session-arg "name:string='Ectoplasm Token'" \
-    --session-arg "symbol:string='ECTO'" \
-    --session-arg "decimals:u8='18'" \
-    --session-arg "total_supply:u256='1000000000000000000000000000'" \
-    | jq -r '.result.deploy_hash')
+    --session-path ./wasm/EctoToken.wasm \
+    --session-arg "odra_cfg_package_hash_key_name:string='ecto_token'" \
+    --session-arg "odra_cfg_allow_key_override:bool='true'" \
+    --session-arg "odra_cfg_is_upgradable:bool='false'" \
+    --session-arg "odra_cfg_is_upgrade:bool='false'" \
+    2>&1 | grep -v "^#" | jq -r '.result.deploy_hash')
 
 echo "ECTO Deploy Hash: $ECTO_DEPLOY"
 check_deploy $ECTO_DEPLOY
-ECTO_HASH=$(get_contract_hash $ECTO_DEPLOY)
+ECTO_HASH=$(get_contract_hash "ecto_token")
 echo "ECTO Contract Hash: $ECTO_HASH"
-update_env "ECTO_CONTRACT_HASH" "$ECTO_HASH"
+update_env "ECTO_CONTRACT_HASH" "hash-$ECTO_HASH"
 
-# Deploy USDC Token
+# Deploy USDC Token (Odra-built, values hardcoded in contract)
 echo "Deploying USDC Token..."
 USDC_DEPLOY=$(casper-client put-deploy \
-    --node-address $NODE_ADDRESS \
-    --chain-name $CHAIN_NAME \
-    --secret-key $SECRET_KEY \
+    --node-address "$NODE_ADDRESS" \
+    --chain-name "$CHAIN_NAME" \
+    --secret-key "$SECRET_KEY" \
     --payment-amount $GAS_TOKEN \
-    --session-path ./wasm/Cep18.wasm \
-    --session-arg "name:string='USD Coin'" \
-    --session-arg "symbol:string='USDC'" \
-    --session-arg "decimals:u8='6'" \
-    --session-arg "total_supply:u256='1000000000000'" \
-    | jq -r '.result.deploy_hash')
+    --session-path ./wasm/UsdcToken.wasm \
+    --session-arg "odra_cfg_package_hash_key_name:string='usdc_token'" \
+    --session-arg "odra_cfg_allow_key_override:bool='true'" \
+    --session-arg "odra_cfg_is_upgradable:bool='false'" \
+    --session-arg "odra_cfg_is_upgrade:bool='false'" \
+    2>&1 | grep -v "^#" | jq -r '.result.deploy_hash')
 
 echo "USDC Deploy Hash: $USDC_DEPLOY"
 check_deploy $USDC_DEPLOY
-USDC_HASH=$(get_contract_hash $USDC_DEPLOY)
+USDC_HASH=$(get_contract_hash "usdc_token")
 echo "USDC Contract Hash: $USDC_HASH"
-update_env "USDC_CONTRACT_HASH" "$USDC_HASH"
+update_env "USDC_CONTRACT_HASH" "hash-$USDC_HASH"
 
-# Deploy WETH Token
+# Deploy WETH Token (Odra-built, values hardcoded in contract)
 echo "Deploying WETH Token..."
 WETH_DEPLOY=$(casper-client put-deploy \
-    --node-address $NODE_ADDRESS \
-    --chain-name $CHAIN_NAME \
-    --secret-key $SECRET_KEY \
+    --node-address "$NODE_ADDRESS" \
+    --chain-name "$CHAIN_NAME" \
+    --secret-key "$SECRET_KEY" \
     --payment-amount $GAS_TOKEN \
-    --session-path ./wasm/Cep18.wasm \
-    --session-arg "name:string='Wrapped Ethereum'" \
-    --session-arg "symbol:string='WETH'" \
-    --session-arg "decimals:u8='18'" \
-    --session-arg "total_supply:u256='100000000000000000000000'" \
-    | jq -r '.result.deploy_hash')
+    --session-path ./wasm/WethToken.wasm \
+    --session-arg "odra_cfg_package_hash_key_name:string='weth_token'" \
+    --session-arg "odra_cfg_allow_key_override:bool='true'" \
+    --session-arg "odra_cfg_is_upgradable:bool='false'" \
+    --session-arg "odra_cfg_is_upgrade:bool='false'" \
+    2>&1 | grep -v "^#" | jq -r '.result.deploy_hash')
 
 echo "WETH Deploy Hash: $WETH_DEPLOY"
 check_deploy $WETH_DEPLOY
-WETH_HASH=$(get_contract_hash $WETH_DEPLOY)
+WETH_HASH=$(get_contract_hash "weth_token")
 echo "WETH Contract Hash: $WETH_HASH"
-update_env "WETH_CONTRACT_HASH" "$WETH_HASH"
+update_env "WETH_CONTRACT_HASH" "hash-$WETH_HASH"
 
-# Deploy WBTC Token
+# Deploy WBTC Token (Odra-built, values hardcoded in contract)
 echo "Deploying WBTC Token..."
 WBTC_DEPLOY=$(casper-client put-deploy \
-    --node-address $NODE_ADDRESS \
-    --chain-name $CHAIN_NAME \
-    --secret-key $SECRET_KEY \
+    --node-address "$NODE_ADDRESS" \
+    --chain-name "$CHAIN_NAME" \
+    --secret-key "$SECRET_KEY" \
     --payment-amount $GAS_TOKEN \
-    --session-path ./wasm/Cep18.wasm \
-    --session-arg "name:string='Wrapped Bitcoin'" \
-    --session-arg "symbol:string='WBTC'" \
-    --session-arg "decimals:u8='8'" \
-    --session-arg "total_supply:u256='2100000000000000'" \
-    | jq -r '.result.deploy_hash')
+    --session-path ./wasm/WbtcToken.wasm \
+    --session-arg "odra_cfg_package_hash_key_name:string='wbtc_token'" \
+    --session-arg "odra_cfg_allow_key_override:bool='true'" \
+    --session-arg "odra_cfg_is_upgradable:bool='false'" \
+    --session-arg "odra_cfg_is_upgrade:bool='false'" \
+    2>&1 | grep -v "^#" | jq -r '.result.deploy_hash')
 
 echo "WBTC Deploy Hash: $WBTC_DEPLOY"
 check_deploy $WBTC_DEPLOY
-WBTC_HASH=$(get_contract_hash $WBTC_DEPLOY)
+WBTC_HASH=$(get_contract_hash "wbtc_token")
 echo "WBTC Contract Hash: $WBTC_HASH"
-update_env "WBTC_CONTRACT_HASH" "$WBTC_HASH"
+update_env "WBTC_CONTRACT_HASH" "hash-$WBTC_HASH"
 
-# Deploy WCSPR Token
-echo "Deploying WCSPR Token..."
-WCSPR_DEPLOY=$(casper-client put-deploy \
-    --node-address $NODE_ADDRESS \
-    --chain-name $CHAIN_NAME \
-    --secret-key $SECRET_KEY \
-    --payment-amount $GAS_TOKEN \
-    --session-path ./wasm/Cep18.wasm \
-    --session-arg "name:string='Wrapped CSPR'" \
-    --session-arg "symbol:string='WCSPR'" \
-    --session-arg "decimals:u8='9'" \
-    --session-arg "total_supply:u256='0'" \
-    | jq -r '.result.deploy_hash')
-
-echo "WCSPR Deploy Hash: $WCSPR_DEPLOY"
-check_deploy $WCSPR_DEPLOY
-WCSPR_HASH=$(get_contract_hash $WCSPR_DEPLOY)
-echo "WCSPR Contract Hash: $WCSPR_HASH"
-update_env "WCSPR_CONTRACT_HASH" "$WCSPR_HASH"
+# NOTE: WCSPR Token skipped - no WCSPR WASM in Odra contracts
+# If needed, deploy a standard CEP-18 token separately or use LpToken as WCSPR
+# For now, we'll use a placeholder address for Router deployment
+echo -e "${YELLOW}Skipping WCSPR deployment (not in Odra contracts)${NC}"
+echo "Using LpToken contract hash as WCSPR placeholder..."
+WCSPR_HASH="16eacd913f576394fbf114f652504e960367be71b560795fb9d7cf4d5c98ea68"
+update_env "WCSPR_CONTRACT_HASH" "hash-$WCSPR_HASH"
 
 # Step 4: Deploy DEX Core Contracts
 echo -e "\n${YELLOW}Step 4: Deploying DEX core contracts...${NC}"
 
-# Deploy Factory
-echo "Deploying Factory Contract..."
-FACTORY_DEPLOY=$(casper-client put-deploy \
-    --node-address $NODE_ADDRESS \
-    --chain-name $CHAIN_NAME \
-    --secret-key $SECRET_KEY \
-    --payment-amount $GAS_FACTORY \
-    --session-path ./wasm/Factory.wasm \
-    --session-arg "fee_to_setter:key='account-hash-$ACCOUNT_HASH'" \
-    | jq -r '.result.deploy_hash')
+# Check if Factory is already deployed (from contracts.toml or .env)
+EXISTING_FACTORY="${FACTORY_CONTRACT_HASH:-}"
+if [ -n "$EXISTING_FACTORY" ] && [ "$EXISTING_FACTORY" != "your-factory-hash-here" ]; then
+    echo -e "${GREEN}Factory already deployed: $EXISTING_FACTORY${NC}"
+    FACTORY_HASH="${EXISTING_FACTORY#hash-}"
+else
+    # Deploy Factory
+    echo "Deploying Factory Contract..."
+    # Get the account hash from the public key
+    ACCOUNT_HASH_VALUE=$(casper-client account-address --public-key "$DEPLOYER_PUBLIC_KEY" 2>&1 | grep -v "^#" | jq -r '.')
+    echo "Deployer Account Hash: $ACCOUNT_HASH_VALUE"
+    FACTORY_DEPLOY=$(casper-client put-deploy \
+        --node-address "$NODE_ADDRESS" \
+        --chain-name "$CHAIN_NAME" \
+        --secret-key "$SECRET_KEY" \
+        --payment-amount $GAS_FACTORY \
+        --session-path ./wasm/Factory.wasm \
+        --session-arg "fee_to_setter:key='$ACCOUNT_HASH_VALUE'" \
+        --session-arg "odra_cfg_package_hash_key_name:string='ectoplasm_factory'" \
+        --session-arg "odra_cfg_allow_key_override:bool='true'" \
+        --session-arg "odra_cfg_is_upgradable:bool='false'" \
+        --session-arg "odra_cfg_is_upgrade:bool='false'" \
+        2>&1 | grep -v "^#" | jq -r '.result.deploy_hash')
 
-echo "Factory Deploy Hash: $FACTORY_DEPLOY"
-check_deploy $FACTORY_DEPLOY
-FACTORY_HASH=$(get_contract_hash $FACTORY_DEPLOY)
-echo "Factory Contract Hash: $FACTORY_HASH"
-update_env "FACTORY_CONTRACT_HASH" "$FACTORY_HASH"
+    echo "Factory Deploy Hash: $FACTORY_DEPLOY"
+    check_deploy $FACTORY_DEPLOY
+    FACTORY_HASH=$(get_contract_hash "ectoplasm_factory")
+    echo "Factory Contract Hash: $FACTORY_HASH"
+    update_env "FACTORY_CONTRACT_HASH" "hash-$FACTORY_HASH"
+fi
 
-# Deploy Router
-echo "Deploying Router Contract..."
-ROUTER_DEPLOY=$(casper-client put-deploy \
-    --node-address $NODE_ADDRESS \
-    --chain-name $CHAIN_NAME \
-    --secret-key $SECRET_KEY \
-    --payment-amount $GAS_ROUTER \
-    --session-path ./wasm/Router.wasm \
-    --session-arg "factory:key='hash-$FACTORY_HASH'" \
-    --session-arg "wcspr:key='hash-$WCSPR_HASH'" \
-    | jq -r '.result.deploy_hash')
+# Check if Router is already deployed
+EXISTING_ROUTER="${ROUTER_CONTRACT_HASH:-}"
+if [ -n "$EXISTING_ROUTER" ] && [ "$EXISTING_ROUTER" != "your-router-hash-here" ]; then
+    echo -e "${GREEN}Router already deployed: $EXISTING_ROUTER${NC}"
+    ROUTER_HASH="${EXISTING_ROUTER#hash-}"
+else
+    # Deploy Router
+    echo "Deploying Router Contract..."
+    ROUTER_DEPLOY=$(casper-client put-deploy \
+        --node-address "$NODE_ADDRESS" \
+        --chain-name "$CHAIN_NAME" \
+        --secret-key "$SECRET_KEY" \
+        --payment-amount $GAS_ROUTER \
+        --session-path ./wasm/Router.wasm \
+        --session-arg "factory:key='hash-$FACTORY_HASH'" \
+        --session-arg "wcspr:key='hash-$WCSPR_HASH'" \
+        --session-arg "odra_cfg_package_hash_key_name:string='ectoplasm_router'" \
+        --session-arg "odra_cfg_allow_key_override:bool='true'" \
+        --session-arg "odra_cfg_is_upgradable:bool='false'" \
+        --session-arg "odra_cfg_is_upgrade:bool='false'" \
+        2>&1 | grep -v "^#" | jq -r '.result.deploy_hash')
 
-echo "Router Deploy Hash: $ROUTER_DEPLOY"
-check_deploy $ROUTER_DEPLOY
-ROUTER_HASH=$(get_contract_hash $ROUTER_DEPLOY)
-echo "Router Contract Hash: $ROUTER_HASH"
-update_env "ROUTER_CONTRACT_HASH" "$ROUTER_HASH"
+    echo "Router Deploy Hash: $ROUTER_DEPLOY"
+    check_deploy $ROUTER_DEPLOY
+    ROUTER_HASH=$(get_contract_hash "ectoplasm_router")
+    echo "Router Contract Hash: $ROUTER_HASH"
+    update_env "ROUTER_CONTRACT_HASH" "hash-$ROUTER_HASH"
+fi
 
 # Step 5: Create Trading Pairs
 echo -e "\n${YELLOW}Step 5: Creating trading pairs...${NC}"
@@ -316,7 +340,7 @@ create_pair() {
         --session-entry-point "create_pair" \
         --session-arg "token_a:key='hash-$token_a'" \
         --session-arg "token_b:key='hash-$token_b'" \
-        | jq -r '.result.deploy_hash')
+        2>&1 | grep -v "^#" | jq -r '.result.deploy_hash')
     
     echo "$pair_name Deploy Hash: $PAIR_DEPLOY"
     check_deploy $PAIR_DEPLOY
