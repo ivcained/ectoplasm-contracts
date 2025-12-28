@@ -162,8 +162,19 @@ if [ -f "./wasm/EctoToken.wasm" ]; then
     echo -e "${GREEN}Contracts already built, skipping build step${NC}"
 else
     echo "Building contracts..."
-    cargo odra build
-    echo -e "${GREEN}Contracts built successfully${NC}"
+    # `cargo odra build` may exit non-zero if `wasm-opt` is missing,
+    # even though it successfully generates WASM files.
+    if cargo odra build; then
+        echo -e "${GREEN}Contracts built successfully${NC}"
+    else
+        if [ -f "./wasm/EctoToken.wasm" ] && [ -f "./wasm/Factory.wasm" ] && [ -f "./wasm/Router.wasm" ]; then
+            echo -e "${YELLOW}Warning: cargo odra build failed (likely missing wasm-opt), but WASM files exist. Continuing...${NC}"
+        else
+            echo -e "${RED}Error: cargo odra build failed and expected WASM files are missing.${NC}"
+            echo -e "${RED}Install wasm-opt (binaryen) and retry.${NC}"
+            exit 1
+        fi
+    fi
 fi
 
 # Step 3: Deploy tokens

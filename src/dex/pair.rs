@@ -28,9 +28,11 @@ pub struct Pair {
     reserve1: Var<U256>,
     /// Block timestamp of last update
     block_timestamp_last: Var<u64>,
-    /// Cumulative price of token0
+    /// Cumulative price of token0 (for oracle)
+    #[allow(dead_code)]
     price0_cumulative_last: Var<U256>,
-    /// Cumulative price of token1
+    /// Cumulative price of token1 (for oracle)
+    #[allow(dead_code)]
     price1_cumulative_last: Var<U256>,
     /// K value from last liquidity event (for fee calculation)
     k_last: Var<U256>,
@@ -461,7 +463,7 @@ impl Pair {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use odra::host::{Deployer, HostEnv};
+    use odra::host::Deployer;
 
     #[test]
     fn test_pair_init() {

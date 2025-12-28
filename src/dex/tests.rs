@@ -14,9 +14,8 @@ mod integration_tests {
     
     use crate::dex::factory::{Factory, FactoryInitArgs, FactoryHostRef};
     use crate::dex::router::{Router, RouterInitArgs, RouterHostRef};
-    use crate::dex::pair::{Pair, PairInitArgs, PairHostRef};
+    use crate::dex::pair::{Pair, PairInitArgs};
     use crate::token::{LpToken, LpTokenInitArgs, LpTokenHostRef};
-    use crate::errors::DexError;
 
     /// Helper struct to set up test environment
     struct TestEnv {
@@ -70,7 +69,8 @@ mod integration_tests {
             }
         }
 
-        fn mint_tokens(&mut self, user: odra::Address, amount: U256) {
+        #[allow(dead_code)]
+        fn mint_tokens(&mut self, user: Address, amount: U256) {
             self.token_a.mint(user, amount);
             self.token_b.mint(user, amount);
         }
@@ -92,24 +92,24 @@ mod integration_tests {
         let token_a_addr = test_env.token_a.address().clone();
         let token_b_addr = test_env.token_b.address().clone();
 
-        let result = test_env.factory.create_pair(token_a_addr, token_b_addr);
-        assert!(result.is_ok());
+        let _pair_addr = test_env.factory.create_pair(token_a_addr, token_b_addr);
 
         assert_eq!(test_env.factory.all_pairs_length(), 1);
         assert!(test_env.factory.pair_exists(token_a_addr, token_b_addr));
     }
 
     #[test]
+    #[should_panic(expected = "PairExists")]
     fn test_create_duplicate_pair_fails() {
         let mut test_env = TestEnv::new();
         
         let token_a_addr = test_env.token_a.address().clone();
         let token_b_addr = test_env.token_b.address().clone();
 
-        test_env.factory.create_pair(token_a_addr, token_b_addr).unwrap();
+        test_env.factory.create_pair(token_a_addr, token_b_addr);
         
-        let result = test_env.factory.create_pair(token_a_addr, token_b_addr);
-        assert_eq!(result, Err(DexError::PairExists));
+        // This should panic with PairExists error
+        test_env.factory.create_pair(token_a_addr, token_b_addr);
     }
 
     #[test]
@@ -261,12 +261,13 @@ mod integration_tests {
         });
 
         env.set_caller(admin);
-        factory.set_fee_to(fee_recipient).unwrap();
+        factory.set_fee_to(fee_recipient);
 
         assert_eq!(factory.fee_to(), Some(fee_recipient));
     }
 
     #[test]
+    #[should_panic(expected = "Unauthorized")]
     fn test_factory_set_fee_to_unauthorized() {
         let env = odra_test::env();
         let admin = env.get_account(0);
@@ -278,9 +279,8 @@ mod integration_tests {
         });
 
         env.set_caller(non_admin);
-        let result = factory.set_fee_to(fee_recipient);
-
-        assert_eq!(result, Err(DexError::Unauthorized));
+        // This should panic with Unauthorized error
+        factory.set_fee_to(fee_recipient);
     }
 
     #[test]
