@@ -13,5 +13,8 @@ pub mod errors;
 pub mod events;
 pub mod math;
 
+// CEP-4626: Tokenized Vault Standard
+pub mod cep4626;
+
 // LST (Liquid Staking Token) modules
 pub mod lst;
