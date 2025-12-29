@@ -18,3 +18,6 @@ pub mod cep4626;
 
 // LST (Liquid Staking Token) modules
 pub mod lst;
+
+// Lending Protocol modules
+pub mod lending;
