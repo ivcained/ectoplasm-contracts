@@ -13,14 +13,24 @@ if [[ ! -f "$out_env" ]]; then
   exit 1
 fi
 
-if [[ -f "$env_file" ]]; then
-  # shellcheck disable=SC2046
-  export $(grep -v '^#' "$env_file" | xargs)
-fi
+# Function to load env files safely
+load_env() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      if [[ "$line" != *"="* ]]; then continue; fi
+      local key="${line%%=*}"
+      local value="${line#*=}"
+      if [[ -z "${!key+x}" || -z "${!key}" ]]; then
+        export "$key=$value"
+      fi
+    done < "$file"
+  fi
+}
 
-# Load deployment outputs
-# shellcheck disable=SC2046
-export $(grep -v '^#' "$out_env" | xargs)
+load_env "$env_file"
+load_env "$out_env"
 
 # Defaults
 GAS_PRICE_TOLERANCE="${GAS_PRICE_TOLERANCE:-1}"
