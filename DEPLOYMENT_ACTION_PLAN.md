@@ -99,6 +99,10 @@ The DEX is designed to support the following trading pairs:
 
 ### Phase 1: Pair Creation (Not Yet Completed)
 
+Note: Full AMM operation depends on `create_pair` actually creating/initializing on-chain Pair contracts. Before proceeding with liquidity/swaps, first verify that calling `create_pair`:
+- increases `all_pairs_length`, and
+- makes `get_pair(token_a, token_b)` return a non-empty address.
+
 To create trading pairs, use the Factory contract's `create_pair` function:
 
 ```bash
@@ -260,46 +264,25 @@ pub fn burn(&mut self, from: Address, amount: U256)
 
 #### Connect to Contracts
 
-```javascript
-import { CasperClient, CLPublicKey } from "casper-js-sdk";
+On Casper, frontend integration is split into:
+- **Reads**: RPC state queries (no signing).
+- **Writes**: signed transactions (wallet signing in browser, or `casper-client`/backend signer).
 
-const client = new CasperClient("http://65.21.235.122:7777/rpc");
-
-const FACTORY_HASH = "hash-c6c3cadda303246b4e7c953751e56ef36e1d804feb13515ff17f04f242a60bcd";
-const ROUTER_HASH = "hash-c50d491c65e5cbc8ab859fe6e7d1253c24cf877258bf4579a59e6ce4d5d15275";
-```
+This repo already includes a working reference for reads:
+- `tools/odra-state-reader-ts` (Casper JS SDK v5 + Odra dictionary reads)
 
 #### Query Pair Information
 
-```javascript
-// Get pair address
-const pairAddress = await client.queryContractData(
-  FACTORY_HASH,
-  ["get_pair", tokenA, tokenB]
-);
+Avoid assuming EVM-style "call contract getter" APIs like `queryContractData(...)`.
 
-// Get reserves
-const reserves = await client.queryContractData(
-  pairAddress,
-  ["get_reserves"]
-);
-```
+For Odra contracts, state is typically stored under the `state` dictionary. Use the TS reader approach (dictionary lookups + decoding) to read values.
 
 #### Execute Swap
 
-```javascript
-// 1. Approve Router to spend tokens
-await approveToken(tokenAddress, ROUTER_HASH, amount);
-
-// 2. Execute swap
-await executeSwap(
-  amountIn,
-  amountOutMin,
-  [tokenA, tokenB],
-  recipientAddress,
-  deadline
-);
-```
+Swaps require a signed transaction. In browser, that usually means:
+- build transaction payload (entrypoint + args),
+- have a wallet sign it,
+- submit to node RPC.
 
 ### For Backend Developers
 

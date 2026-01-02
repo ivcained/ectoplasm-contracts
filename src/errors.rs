@@ -3,6 +3,7 @@ use odra::prelude::*;
 
 /// Custom errors for the DEX contract
 #[odra::odra_error]
+#[derive(Debug)]
 pub enum DexError {
     /// Insufficient liquidity in the pool
     InsufficientLiquidity = 1,

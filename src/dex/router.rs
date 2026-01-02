@@ -559,7 +559,7 @@ impl Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use odra::host::{Deployer, HostEnv};
+    use odra::host::Deployer;
 
     #[test]
     fn test_router_init() {

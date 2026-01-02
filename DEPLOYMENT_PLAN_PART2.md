@@ -4,21 +4,23 @@
 
 #### 6.2 Add Liquidity to CSPR/USDC Pool
 ```bash
-casper-client put-deploy \
-  --node-address https://node.testnet.cspr.cloud/rpc \
+casper-client put-transaction package \
+  --node-address http://YOUR_NODE_HOST:7777 \
   --chain-name casper-test \
   --secret-key ./keys/secret_key.pem \
   --payment-amount 50000000000 \
-  --session-hash hash-ROUTER_CONTRACT_HASH \
-  --session-entry-point "add_liquidity" \
-  --session-arg "token_a:key='hash-WCSPR_CONTRACT_HASH'" \
-  --session-arg "token_b:key='hash-USDC_CONTRACT_HASH'" \
+  --gas-price-tolerance 1 \
+  --standard-payment true \
+  --contract-package-hash hash-ROUTER_PACKAGE_HASH \
+  --session-entry-point add_liquidity \
+  --session-arg "token_a:key='hash-WCSPR_PACKAGE_HASH'" \
+  --session-arg "token_b:key='hash-USDC_PACKAGE_HASH'" \
   --session-arg "amount_a_desired:u256='10000000000000'" \
   --session-arg "amount_b_desired:u256='1000000000'" \
   --session-arg "amount_a_min:u256='9500000000000'" \
   --session-arg "amount_b_min:u256='950000000'" \
   --session-arg "to:key='account-hash-YOUR_ACCOUNT_HASH'" \
-  --session-arg "deadline:u64='1735689600'"
+  --session-arg "deadline:u64='<UNIX_SECONDS_IN_FUTURE>'"
 ```
 
 #### 6.3 Add Liquidity to Other Pools
@@ -35,14 +37,11 @@ Repeat the liquidity addition process for all trading pairs:
 ## Phase 7: Verification & Testing
 
 #### 7.1 Verify Pair Creation
-Query the Factory to verify all pairs were created:
-```bash
-casper-client query-global-state \
-  --node-address https://node.testnet.cspr.cloud/rpc \
-  --state-root-hash STATE_ROOT_HASH \
-  --key hash-FACTORY_CONTRACT_HASH \
-  -q "all_pairs_length"
-```
+Odra stores module state in the contract dictionary named `state`, not as a plain named key path.
+
+Practical verification approach:
+- Read `Factory.all_pairs_length` from the Odra `state` dictionary using `tools/odra-state-reader-ts` (see `LOCAL_NCTL_BUILD_DEPLOY_READ.md`).
+- Or submit a transaction to call a view entrypoint (costs gas).
 
 #### 7.2 Monitor Token Actions via CSPR.cloud
 Use the Streaming API to monitor fungible token actions:
@@ -54,18 +53,22 @@ wscat -c 'wss://streaming.testnet.cspr.cloud/ft-token-actions' \
 #### 7.3 Test Swap Functionality
 Execute a test swap:
 ```bash
-casper-client put-deploy \
-  --node-address https://node.testnet.cspr.cloud/rpc \
+casper-client put-transaction package \
+  --node-address http://YOUR_NODE_HOST:7777 \
   --chain-name casper-test \
   --secret-key ./keys/secret_key.pem \
   --payment-amount 30000000000 \
-  --session-hash hash-ROUTER_CONTRACT_HASH \
-  --session-entry-point "swap_exact_tokens_for_tokens" \
-  --session-arg "amount_in:u256='1000000000'" \
-  --session-arg "amount_out_min:u256='900000'" \
-  --session-arg "path:list='hash-WCSPR,hash-USDC'" \
-  --session-arg "to:key='account-hash-YOUR_ACCOUNT_HASH'" \
-  --session-arg "deadline:u64='1735689600'"
+  --gas-price-tolerance 1 \
+  --standard-payment true \
+  --contract-package-hash hash-ROUTER_PACKAGE_HASH \
+  --session-entry-point swap_exact_tokens_for_tokens \
+  --session-args-json '[
+    {"name":"amount_in","type":"U256","value":"1000000000"},
+    {"name":"amount_out_min","type":"U256","value":"900000"},
+    {"name":"path","type":{"List":"Key"},"value":["hash-WCSPR_PACKAGE_HASH","hash-USDC_PACKAGE_HASH"]},
+    {"name":"to","type":"Key","value":"account-hash-YOUR_ACCOUNT_HASH"},
+    {"name":"deadline","type":"U64","value":<UNIX_SECONDS_IN_FUTURE>}
+  ]'
 ```
 
 #### 7.4 Verify Reserves

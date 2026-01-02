@@ -19,3 +19,9 @@ secret_key*
 # Deployment artifacts
 deployment_info.json
 deployment_*.json
+scripts/deploy-new.out.env
+scripts/.deploy-new.out.env.tmp
+/odra-release-2.5.0
+# scripts/deploy-new.out.env
+/odra-state-reader-ts
+/casper-js-sdk-dev
